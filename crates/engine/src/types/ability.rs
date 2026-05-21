@@ -5426,8 +5426,9 @@ pub enum Effect {
         /// CR 406.3: When true the exiled cards enter Exile face down and
         /// must not be examinable by any player (the resolver flips the
         /// moved object's `face_down` flag, and `visibility.rs` redacts the
-        /// card for non-owners). Covers the Necropotence / Bomat Courier /
-        /// Asmodeus the Archfiend / Knowledge Vault class — every card
+        /// card unless a separate effect grants look permission). Covers the
+        /// Necropotence / Bomat Courier / Asmodeus the Archfiend /
+        /// Knowledge Vault class — every card
         /// whose Oracle text says "exile the top card of your library face
         /// down". Skipped from serialization when false so JSON snapshots
         /// and stored card-data for face-up `ExileTop` effects are

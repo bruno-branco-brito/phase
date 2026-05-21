@@ -65,8 +65,8 @@ pub fn resolve(
         // except when instructions allow it. Set the moved object's
         // face-down state immediately after the zone change (mirrors the
         // foretell pattern in `casting.rs`) so `visibility.rs`'s
-        // per-viewer redaction hides the card from opponents (Necropotence
-        // / Bomat Courier / Asmodeus class).
+        // per-viewer redaction hides the card unless a separate effect grants
+        // look permission (Necropotence / Bomat Courier / Asmodeus class).
         if face_down {
             if let Some(obj) = state.objects.get_mut(&object_id) {
                 obj.face_down = true;
@@ -584,8 +584,8 @@ mod tests {
 
     /// CR 406.3: `Effect::ExileTop { face_down: true }` must flip the
     /// exiled object's `face_down` flag so `visibility.rs` can redact the
-    /// card for non-owner viewers (Necropotence / Bomat Courier /
-    /// Asmodeus the Archfiend / Knowledge Vault class).
+    /// card unless a separate effect grants look permission (Necropotence /
+    /// Bomat Courier / Asmodeus the Archfiend / Knowledge Vault class).
     #[test]
     fn exile_top_face_down_sets_object_face_down_flag() {
         let mut state = GameState::new_two_player(42);
