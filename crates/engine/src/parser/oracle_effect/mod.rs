@@ -9450,6 +9450,16 @@ fn parse_choose_filter_from_sentence(lower: &str, ctx: &mut ParseContext) -> Tar
 /// Check if an effect exiles objects (candidate for tracked set recording).
 /// Also looks inside `CreateDelayedTrigger` wrappers, since a previous clause's
 /// exile may have already been wrapped by `strip_temporal_suffix`.
+///
+/// CR 406.1 + CR 603.7: `ExileTop` exiles the top N cards of a library — the
+/// same library-to-exile zone transfer that `ChangeZone { destination: Exile }`
+/// performs for a specifically-targeted card. Cross-clause anaphors like
+/// "put that card into your hand at the beginning of your next end step"
+/// (Necropotence, Bomat Courier, Asmodeus the Archfiend, Knowledge Vault — the
+/// exile-top-then-recall class, ~16 cards) bind to the just-exiled cards via
+/// the tracked-set pathway. Without including `ExileTop` here, follow-up
+/// clauses against an `ExileTop` prior never publish a tracked set and the
+/// delayed-trigger return resolves with `ParentTarget` pointing nowhere.
 fn is_exile_effect(effect: &Effect) -> bool {
     match effect {
         Effect::ChangeZone {
@@ -9459,7 +9469,8 @@ fn is_exile_effect(effect: &Effect) -> bool {
         | Effect::ChangeZoneAll {
             destination: Zone::Exile,
             ..
-        } => true,
+        }
+        | Effect::ExileTop { .. } => true,
         Effect::CreateDelayedTrigger { effect: inner, .. } => is_exile_effect(&inner.effect),
         _ => false,
     }
@@ -9490,18 +9501,47 @@ fn contains_explicit_tracked_set_pronoun(lower: &str) -> bool {
         || scan_contains_phrase(lower, "the exiled creature")
 }
 
-/// CR 603.7: Detect implicit anaphora ("return it/them to the battlefield")
-/// when preceded by an exile effect. Context-sensitive — only matches when
-/// the pronoun is in a return-to-battlefield construction.
+/// CR 603.7: Detect implicit anaphora when preceded by an exile effect.
+/// Context-sensitive — only matches when the pronoun is in a recall
+/// construction whose destination is one of the supported zones.
 /// `lower` must be the pre-lowered version of the text.
+///
+/// Two recall shapes are recognized:
+///   * "return it/them to the battlefield" — the Aetherling / Crackling Drake
+///     class (exile-then-return-to-battlefield).
+///   * "put that card/them/it into your hand" — the Necropotence / Bomat
+///     Courier / Asmodeus class (exile-then-recall-to-hand). The hand-recall
+///     branch is what unlocks Necropotence's "Pay 1 life: Exile the top card
+///     of your library face down. Put that card into your hand at the
+///     beginning of your next end step." pattern (~16 cards).
 fn contains_implicit_tracked_set_pronoun(lower: &str) -> bool {
-    alt((
+    // Battlefield recall — "return it/them ... battlefield". Start-anchored
+    // because cross-clause anaphors begin the recall clause.
+    let battlefield_recall = alt((
         tag::<_, _, OracleError<'_>>("return it "),
         tag("return them "),
     ))
     .parse(lower)
     .is_ok()
-        && scan_contains_phrase(lower, "battlefield")
+        && scan_contains_phrase(lower, "battlefield");
+
+    // Hand recall — "put {that card,them,it} into your hand". Composed via
+    // nested `alt()` over the pronoun axis (CLAUDE.md "compose nom
+    // combinators, don't enumerate permutations") within a shared "put …
+    // into your hand" frame.
+    let hand_recall = (
+        tag::<_, _, OracleError<'_>>("put "),
+        alt((
+            tag::<_, _, OracleError<'_>>("that card"),
+            tag("them"),
+            tag("it"),
+        )),
+        tag(" into your hand"),
+    )
+        .parse(lower)
+        .is_ok();
+
+    battlefield_recall || hand_recall
 }
 
 fn mark_uses_tracked_set(def: &mut AbilityDefinition) {
@@ -12280,9 +12320,17 @@ pub(crate) fn lower_effect_chain_ir(ir: &EffectChainIr) -> AbilityDefinition {
                 // snapshotted referent has left that zone. Sibling of (not nested
                 // in) the tracked-set rewrite above — this must fire for the
                 // non-anaphor "that card" phrasing too.
+                //
+                // CR 406.1: `ExileTop` always moves cards to `Zone::Exile`. Without
+                // this arm the Necropotence / Bomat Courier class's delayed return
+                // ("put that card into your hand at the beginning of your next end
+                // step") would not have its `origin: Exile` stamped, so the
+                // resolver's referent-zone guard would erroneously suppress the
+                // recall even when the card is still in exile.
                 let prev_zone: Option<Zone> = match prev_eff {
                     Effect::ChangeZone { destination, .. }
                     | Effect::ChangeZoneAll { destination, .. } => Some(*destination),
+                    Effect::ExileTop { .. } => Some(Zone::Exile),
                     _ => None,
                 };
                 if let Some(zone) = prev_zone {

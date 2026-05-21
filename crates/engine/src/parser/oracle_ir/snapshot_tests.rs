@@ -206,6 +206,45 @@ fn aetherling() {
 }
 
 // ---------------------------------------------------------------------------
+// Necropotence — full three-layer card: static + on-discard trigger +
+// pay-life-to-exile-and-recall activated.
+//
+// CR 614.10 + CR 614.1b: "Skip your draw step." parses as `StaticMode::SkipStep
+// { step: Phase::Draw }` via `parse_static_line` (already wired end-to-end —
+// see `turns.rs` SkipStep tests).
+//
+// CR 701.9 + CR 603.7c: "Whenever you discard a card, exile that card from
+// your graveyard." parses as `TriggerMode::Discarded` with the
+// `valid_card.controller = You` constraint, and the "exile that card from
+// your graveyard" body lifts `ParentTarget` → `TriggeringSource` via
+// `lift_parent_target_to_triggering_source_in_ability` so the just-discarded
+// card is the referent.
+//
+// CR 406.1 + CR 603.7: "Pay 1 life: Exile the top card of your library face
+// down. Put that card into your hand at the beginning of your next end step."
+// — `ExileTop` publishes a tracked set when followed by a hand-recall
+// anaphor; the recall's `ParentTarget` is rewritten to `TrackedSet { id: 0 }`
+// and wrapped in a `CreateDelayedTrigger { AtNextPhaseForPlayer { End, controller }, uses_tracked_set: true }`.
+//
+// FIDELITY GAP (deferred): the "face down" qualifier on the exile is dropped
+// — `Effect::ExileTop` has no `face_down` parameter today. Adding it requires
+// a new field on the variant plus resolver/zone/filter changes (hidden info
+// across the multiplayer state filter). Tracked separately; the recall
+// pathway works because tracked-set binding is by ObjectId regardless of
+// face state.
+#[test]
+fn necropotence() {
+    let (ir, lowered) = parse_two_layer(
+        "Skip your draw step.\nWhenever you discard a card, exile that card from your graveyard.\nPay 1 life: Exile the top card of your library face down. Put that card into your hand at the beginning of your next end step.",
+        "Necropotence",
+        &["Enchantment"],
+        &[],
+    );
+    insta::assert_json_snapshot!("necropotence_ir", &ir);
+    insta::assert_json_snapshot!("necropotence_lowered", &lowered);
+}
+
+// ---------------------------------------------------------------------------
 // Planeswalker loyalty
 // ---------------------------------------------------------------------------
 
