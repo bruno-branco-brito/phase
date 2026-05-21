@@ -48,16 +48,14 @@ pub fn resolve(
     let track_exiled_by_source =
         crate::game::exile_links::should_track_exiled_by_source(state, ability.source_id, ability);
 
-    // CR 603.7: A downstream `CreateDelayedTrigger` with `uses_tracked_set:
-    // true` (e.g. Necropotence's "Put that card into your hand at the
-    // beginning of your next end step") binds via the chain's tracked-set
-    // pathway. Detect whether such a downstream reference exists so we only
-    // pay the publish cost when it matters. Mirrors `change_zone::resolve`'s
-    // gate so `ExileTop` participates in the same recall-anaphor protocol as
-    // `Effect::ChangeZone { destination: Zone::Exile, .. }`.
-    let publish_tracked = super::next_sub_needs_tracked_set(ability);
-    let mut exiled_ids = publish_tracked.then(im::Vector::new);
-
+    // CR 603.7: Tracked-set publishing for ExileTop is handled by the
+    // generic chain processor in `effects::resolve_ability_chain` via
+    // `affected_objects_from_events` (which already maps `ExileTop` to the
+    // Exile destination zone). Publishing here as well would double-count
+    // the moved objects in the unified set — see the
+    // `compound_zone_change_chain_unifies_tracked_set` regression. Mirrors
+    // `change_zone::resolve`, which likewise delegates publishing to the
+    // chain processor.
     for object_id in top_cards {
         zones::move_to_zone(state, object_id, Zone::Exile, events);
         if track_exiled_by_source {
@@ -73,15 +71,6 @@ pub fn resolve(
             if let Some(obj) = state.objects.get_mut(&object_id) {
                 obj.face_down = true;
             }
-        }
-        if let Some(ref mut ids) = exiled_ids {
-            ids.push_back(object_id);
-        }
-    }
-
-    if let Some(ids) = exiled_ids {
-        if !ids.is_empty() {
-            super::publish_tracked_set(state, ids.into_iter().collect());
         }
     }
 
@@ -562,8 +551,13 @@ mod tests {
         let mut top_ability = make_exile_top_ability(1);
         top_ability.sub_ability = Some(Box::new(delayed));
 
+        // CR 603.7: Drive through `resolve_ability_chain` so the generic
+        // chain processor's tracked-set publish runs (mirrors live game
+        // resolution); the leaf `exile_top::resolve` deliberately delegates
+        // publishing to the chain layer to avoid double-counting.
         let mut events = Vec::new();
-        resolve(&mut state, &top_ability, &mut events).unwrap();
+        crate::game::effects::resolve_ability_chain(&mut state, &top_ability, &mut events, 0)
+            .unwrap();
 
         // The top card moved to exile.
         assert_eq!(
