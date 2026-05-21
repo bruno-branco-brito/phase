@@ -4751,6 +4751,7 @@ pub(crate) fn try_parse_exile_top_each_library_with_collection_counter(
         Effect::ExileTop {
             player: TargetFilter::Controller,
             count: QuantityExpr::Fixed { value: 1 },
+            face_down: false,
         },
     );
     def.player_scope = Some(PlayerFilter::All);
@@ -7550,6 +7551,7 @@ fn lower_subject_predicate_ast(
                 return parsed_clause(Effect::ExileTop {
                     player: subject.affected,
                     count,
+                    face_down: false,
                 });
             }
             // CR 701.40a + CR 608.2c: "<player> manifests the top [N] card(s) of
@@ -21571,9 +21573,32 @@ mod tests {
                 Effect::ExileTop {
                     player: TargetFilter::Controller,
                     count: QuantityExpr::Fixed { value: 1 },
+                    face_down: false,
                 }
             ),
             "Expected ExileTop(controller, 1), got {:?}",
+            effect
+        );
+    }
+
+    /// CR 406.3: A trailing "face down" qualifier on an `exile the top card`
+    /// clause must lower to `Effect::ExileTop { face_down: true }` so the
+    /// resolver flips the object's `face_down` flag and `visibility.rs`
+    /// redacts the card from non-owner viewers. Covers the Necropotence /
+    /// Bomat Courier / Asmodeus the Archfiend / Knowledge Vault class.
+    #[test]
+    fn exile_top_card_of_your_library_face_down_parses_with_face_down_true() {
+        let effect = parse_effect("Exile the top card of your library face down");
+        assert!(
+            matches!(
+                &effect,
+                Effect::ExileTop {
+                    player: TargetFilter::Controller,
+                    count: QuantityExpr::Fixed { value: 1 },
+                    face_down: true,
+                }
+            ),
+            "Expected ExileTop(controller, 1, face_down=true), got {:?}",
             effect
         );
     }
@@ -24012,6 +24037,7 @@ mod tests {
                 Effect::ExileTop {
                     player: TargetFilter::Controller,
                     count: QuantityExpr::Fixed { value: 2 },
+                    face_down: false,
                 }
             ),
             "Expected ExileTop(controller, 2), got {:?}",
@@ -24050,6 +24076,7 @@ mod tests {
                 Effect::ExileTop {
                     player: TargetFilter::Controller,
                     count: QuantityExpr::Fixed { value: 2 },
+                    face_down: false,
                 }
             ),
             "Expected ExileTop(controller, 2), got {:?}",
@@ -24214,6 +24241,7 @@ mod tests {
                     count: QuantityExpr::Ref {
                         qty: QuantityRef::Variable { ref name }
                     },
+                    face_down: false,
                 } if name == "X"
             ),
             "Expected ExileTop(controller, X), got {:?}",
@@ -24239,6 +24267,7 @@ mod tests {
                                 },
                         },
                 },
+            face_down: false,
         } = &*def.effect
         else {
             panic!(
@@ -24284,6 +24313,7 @@ mod tests {
                             metric: crate::types::ability::CastManaSpentMetric::Total,
                         },
                 },
+            face_down: false,
         } = &*def.effect
         else {
             panic!(
@@ -24318,6 +24348,7 @@ mod tests {
                 Effect::ExileTop {
                     player: TargetFilter::ParentTarget,
                     count: QuantityExpr::Fixed { value: 1 },
+                    face_down: false,
                 }
             ),
             "Expected ExileTop(parent target, 1), got {:?}",
@@ -24668,6 +24699,7 @@ mod tests {
                 Effect::ExileTop {
                     player: TargetFilter::DefendingPlayer,
                     count: QuantityExpr::Fixed { value: 20 },
+                    face_down: false,
                 }
             ),
             "Expected ExileTop(DefendingPlayer, 20), got {:?}",
@@ -24682,7 +24714,11 @@ mod tests {
             AbilityKind::Spell,
         );
         match &*def.effect {
-            Effect::ExileTop { player, count } => {
+            Effect::ExileTop {
+                player,
+                count,
+                face_down: _,
+            } => {
                 assert!(
                     matches!(player, TargetFilter::Typed(tf) if tf.controller == Some(ControllerRef::Opponent)),
                     "Expected opponent target, got {player:?}"
@@ -31757,6 +31793,7 @@ mod tests {
         let Effect::ExileTop {
             player: TargetFilter::Controller,
             count: QuantityExpr::Fixed { value: 1 },
+            face_down: false,
         } = *def.effect
         else {
             panic!("expected all-player ExileTop, got {:?}", def.effect);

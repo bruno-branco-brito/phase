@@ -7808,6 +7808,7 @@ mod tests {
             Effect::ExileTop {
                 player: TargetFilter::Controller,
                 count: QuantityExpr::Fixed { value: 1 },
+                face_down: false,
             },
             vec![],
             evelyn,
@@ -7886,6 +7887,7 @@ mod tests {
             Effect::ExileTop {
                 player: TargetFilter::Controller,
                 count: QuantityExpr::Fixed { value: 1 },
+                face_down: false,
             },
             vec![],
             source,
@@ -9715,6 +9717,7 @@ mod tests {
             Effect::ExileTop {
                 player: TargetFilter::Controller,
                 count: crate::types::ability::QuantityExpr::Fixed { value: 1 },
+                face_down: false,
             },
             vec![],
             ObjectId(100),

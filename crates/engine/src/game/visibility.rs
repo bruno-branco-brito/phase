@@ -114,17 +114,23 @@ pub fn filter_state_for_viewer(state: &GameState, viewer: PlayerId) -> GameState
         }
     }
 
-    let hidden_foretold_exile_ids: Vec<ObjectId> = filtered
+    // CR 406.3: A card exiled face down can't be examined by any player
+    // except when an instruction allows it. Generalizes the prior
+    // foretell-only filter so every face-down exile (Foretell, Necropotence,
+    // Bomat Courier, Asmodeus the Archfiend, Knowledge Vault) is redacted
+    // for viewers other than the owner.
+    let hidden_facedown_exile_ids: Vec<ObjectId> = filtered
         .exile
         .iter()
         .copied()
         .filter(|obj_id| {
-            state.objects.get(obj_id).is_some_and(|obj| {
-                obj.foretold && obj.face_down && !can_view_private_for_player(obj.owner)
-            })
+            state
+                .objects
+                .get(obj_id)
+                .is_some_and(|obj| obj.face_down && !can_view_private_for_player(obj.owner))
         })
         .collect();
-    for obj_id in hidden_foretold_exile_ids {
+    for obj_id in hidden_facedown_exile_ids {
         hide_card(&mut filtered, obj_id);
     }
 

@@ -10,12 +10,17 @@ pub fn resolve(
     ability: &ResolvedAbility,
     events: &mut Vec<GameEvent>,
 ) -> Result<(), EffectError> {
-    let (count, player_filter) = match &ability.effect {
-        Effect::ExileTop { count, player } => (
+    let (count, player_filter, face_down) = match &ability.effect {
+        Effect::ExileTop {
+            count,
+            player,
+            face_down,
+        } => (
             // Use resolve_quantity_with_targets so that TargetZoneCardCount (and
             // DivideRounded wrapping it) can resolve against the targeted player.
             resolve_quantity_with_targets(state, count, ability) as usize,
             player.clone(),
+            *face_down,
         ),
         _ => return Err(EffectError::MissingParam("ExileTop count".to_string())),
     };
@@ -51,20 +56,33 @@ pub fn resolve(
     // gate so `ExileTop` participates in the same recall-anaphor protocol as
     // `Effect::ChangeZone { destination: Zone::Exile, .. }`.
     let publish_tracked = super::next_sub_needs_tracked_set(ability);
-    let mut exiled_ids: Vec<crate::types::identifiers::ObjectId> = Vec::new();
+    let mut exiled_ids = publish_tracked.then(im::Vector::new);
 
     for object_id in top_cards {
         zones::move_to_zone(state, object_id, Zone::Exile, events);
         if track_exiled_by_source {
             crate::game::exile_links::push_tracked_by_source(state, object_id, ability.source_id);
         }
-        if publish_tracked {
-            exiled_ids.push(object_id);
+        // CR 406.3: A card exiled face down can't be examined by any player
+        // except when instructions allow it. Set the moved object's
+        // face-down state immediately after the zone change (mirrors the
+        // foretell pattern in `casting.rs`) so `visibility.rs`'s
+        // per-viewer redaction hides the card from opponents (Necropotence
+        // / Bomat Courier / Asmodeus class).
+        if face_down {
+            if let Some(obj) = state.objects.get_mut(&object_id) {
+                obj.face_down = true;
+            }
+        }
+        if let Some(ref mut ids) = exiled_ids {
+            ids.push_back(object_id);
         }
     }
 
-    if publish_tracked && !exiled_ids.is_empty() {
-        super::publish_tracked_set(state, exiled_ids);
+    if let Some(ids) = exiled_ids {
+        if !ids.is_empty() {
+            super::publish_tracked_set(state, ids.into_iter().collect());
+        }
     }
 
     events.push(GameEvent::EffectResolved {
@@ -96,6 +114,7 @@ mod tests {
                 count: QuantityExpr::Fixed {
                     value: count as i32,
                 },
+                face_down: false,
             },
             vec![],
             ObjectId(100),
@@ -169,6 +188,7 @@ mod tests {
             Effect::ExileTop {
                 player: TargetFilter::Controller,
                 count: QuantityExpr::Fixed { value: 1 },
+                face_down: false,
             },
             vec![],
             source,
@@ -219,6 +239,7 @@ mod tests {
             Effect::ExileTop {
                 player: TargetFilter::TriggeringPlayer,
                 count: QuantityExpr::Fixed { value: 1 },
+                face_down: false,
             },
             vec![],
             ObjectId(100),
@@ -306,6 +327,7 @@ mod tests {
             Effect::ExileTop {
                 player: TargetFilter::Controller,
                 count: QuantityExpr::Fixed { value: 1 },
+                face_down: false,
             },
             vec![TargetRef::Player(PlayerId(1))], // inherited parent target
             ObjectId(100),
@@ -429,6 +451,7 @@ mod tests {
                         },
                     },
                 },
+                face_down: false,
             },
             vec![],
             source,
@@ -562,6 +585,79 @@ mod tests {
             any_set_contains_top,
             "the published tracked set must contain the exiled object ({top:?}), got {:?}",
             state.tracked_object_sets,
+        );
+    }
+
+    /// CR 406.3: `Effect::ExileTop { face_down: true }` must flip the
+    /// exiled object's `face_down` flag so `visibility.rs` can redact the
+    /// card for non-owner viewers (Necropotence / Bomat Courier /
+    /// Asmodeus the Archfiend / Knowledge Vault class).
+    #[test]
+    fn exile_top_face_down_sets_object_face_down_flag() {
+        let mut state = GameState::new_two_player(42);
+        let top = create_object(
+            &mut state,
+            CardId(1),
+            PlayerId(0),
+            "Top".to_string(),
+            Zone::Library,
+        );
+
+        let ability = ResolvedAbility::new(
+            Effect::ExileTop {
+                player: TargetFilter::Controller,
+                count: QuantityExpr::Fixed { value: 1 },
+                face_down: true,
+            },
+            vec![],
+            ObjectId(100),
+            PlayerId(0),
+        );
+
+        let mut events = Vec::new();
+        resolve(&mut state, &ability, &mut events).unwrap();
+
+        let obj = state.objects.get(&top).expect("object should exist");
+        assert_eq!(obj.zone, Zone::Exile);
+        assert!(
+            obj.face_down,
+            "expected face_down=true on the exiled object after `Effect::ExileTop {{ face_down: true }}`",
+        );
+    }
+
+    /// CR 406.3: A face-up `Effect::ExileTop` must leave `face_down`
+    /// untouched (default `false`) so cards exiled face up — the Cascade /
+    /// Impulse / Adventure class — remain inspectable by every player.
+    #[test]
+    fn exile_top_face_up_does_not_set_face_down_flag() {
+        let mut state = GameState::new_two_player(42);
+        let top = create_object(
+            &mut state,
+            CardId(1),
+            PlayerId(0),
+            "Top".to_string(),
+            Zone::Library,
+        );
+
+        let ability = ResolvedAbility::new(
+            Effect::ExileTop {
+                player: TargetFilter::Controller,
+                count: QuantityExpr::Fixed { value: 1 },
+                face_down: false,
+            },
+            vec![],
+            ObjectId(100),
+            PlayerId(0),
+        );
+
+        let mut events = Vec::new();
+        resolve(&mut state, &ability, &mut events).unwrap();
+
+        let obj = state.objects.get(&top).expect("object should exist");
+        assert_eq!(obj.zone, Zone::Exile);
+        assert!(
+            !obj.face_down,
+            "face-up ExileTop must not flip the object's `face_down` flag",
         );
     }
 }

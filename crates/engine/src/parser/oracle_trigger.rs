@@ -8737,6 +8737,7 @@ mod tests {
                 Effect::ExileTop {
                     player: TargetFilter::TriggeringPlayer,
                     count: QuantityExpr::Fixed { value: 1 },
+                    face_down: false,
                 }
             ),
             "expected ExileTop to bind to TriggeringPlayer, got {:?}",
@@ -10152,6 +10153,7 @@ mod tests {
             Effect::ExileTop {
                 player: TargetFilter::Controller,
                 count: QuantityExpr::Fixed { value: 1 },
+                face_down: false,
             }
         ));
 

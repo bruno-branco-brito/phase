@@ -12203,6 +12203,7 @@ mod tests {
                 count: QuantityExpr::Ref {
                     qty: QuantityRef::EventContextAmount
                 },
+                face_down: false,
             }
         ));
     }
