@@ -43,11 +43,28 @@ pub fn resolve(
     let track_exiled_by_source =
         crate::game::exile_links::should_track_exiled_by_source(state, ability.source_id, ability);
 
+    // CR 603.7: A downstream `CreateDelayedTrigger` with `uses_tracked_set:
+    // true` (e.g. Necropotence's "Put that card into your hand at the
+    // beginning of your next end step") binds via the chain's tracked-set
+    // pathway. Detect whether such a downstream reference exists so we only
+    // pay the publish cost when it matters. Mirrors `change_zone::resolve`'s
+    // gate so `ExileTop` participates in the same recall-anaphor protocol as
+    // `Effect::ChangeZone { destination: Zone::Exile, .. }`.
+    let publish_tracked = super::next_sub_needs_tracked_set(ability);
+    let mut exiled_ids: Vec<crate::types::identifiers::ObjectId> = Vec::new();
+
     for object_id in top_cards {
         zones::move_to_zone(state, object_id, Zone::Exile, events);
         if track_exiled_by_source {
             crate::game::exile_links::push_tracked_by_source(state, object_id, ability.source_id);
         }
+        if publish_tracked {
+            exiled_ids.push(object_id);
+        }
+    }
+
+    if publish_tracked && !exiled_ids.is_empty() {
+        super::publish_tracked_set(state, exiled_ids);
     }
 
     events.push(GameEvent::EffectResolved {
@@ -454,5 +471,97 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    /// CR 603.7 + CR 406.1: `ExileTop` must publish a tracked set when a
+    /// downstream `CreateDelayedTrigger { uses_tracked_set: true }` consumes
+    /// it. Necropotence / Bomat Courier / Asmodeus class: the recall delayed
+    /// trigger binds via `TargetFilter::TrackedSet { id: 0 }` (sentinel
+    /// resolved to the most recently published set on this resolution chain).
+    /// Without the publish, the recall would have an empty set and never
+    /// return the exiled card.
+    #[test]
+    fn exile_top_publishes_tracked_set_when_followed_by_recall_delayed_trigger() {
+        use crate::types::ability::DelayedTriggerCondition;
+        use crate::types::phase::Phase;
+
+        let mut state = GameState::new_two_player(42);
+        let top = create_object(
+            &mut state,
+            CardId(1),
+            PlayerId(0),
+            "Top".to_string(),
+            Zone::Library,
+        );
+        let _bottom = create_object(
+            &mut state,
+            CardId(2),
+            PlayerId(0),
+            "Bottom".to_string(),
+            Zone::Library,
+        );
+
+        // Build the Necropotence activated ability shape:
+        // ExileTop -> sub_ability: CreateDelayedTrigger{uses_tracked_set: true,
+        //   effect: ChangeZone{ origin: Exile, destination: Hand,
+        //     target: TrackedSet{id: 0} }}
+        let recall_inner = crate::types::ability::AbilityDefinition::new(
+            AbilityKind::Spell,
+            Effect::ChangeZone {
+                origin: Some(Zone::Exile),
+                destination: Zone::Hand,
+                target: TargetFilter::TrackedSet {
+                    id: crate::types::identifiers::TrackedSetId(0),
+                },
+                under_your_control: false,
+                enter_transformed: false,
+                enter_tapped: false,
+                owner_library: false,
+                enters_attacking: false,
+                up_to: false,
+                enter_with_counters: vec![],
+            },
+        );
+        let delayed = ResolvedAbility::new(
+            Effect::CreateDelayedTrigger {
+                condition: DelayedTriggerCondition::AtNextPhaseForPlayer {
+                    phase: Phase::End,
+                    player: PlayerId(0),
+                },
+                effect: Box::new(recall_inner),
+                uses_tracked_set: true,
+            },
+            vec![],
+            ObjectId(100),
+            PlayerId(0),
+        );
+
+        let mut top_ability = make_exile_top_ability(1);
+        top_ability.sub_ability = Some(Box::new(delayed));
+
+        let mut events = Vec::new();
+        resolve(&mut state, &top_ability, &mut events).unwrap();
+
+        // The top card moved to exile.
+        assert_eq!(
+            state.objects.get(&top).map(|obj| obj.zone),
+            Some(Zone::Exile)
+        );
+
+        // And a tracked set was published containing exactly that card so the
+        // delayed-trigger recall can later resolve it.
+        assert!(
+            !state.tracked_object_sets.is_empty(),
+            "expected ExileTop to publish a tracked set when followed by a uses_tracked_set delayed trigger",
+        );
+        let any_set_contains_top = state
+            .tracked_object_sets
+            .values()
+            .any(|ids| ids.contains(&top));
+        assert!(
+            any_set_contains_top,
+            "the published tracked set must contain the exiled object ({top:?}), got {:?}",
+            state.tracked_object_sets,
+        );
     }
 }
