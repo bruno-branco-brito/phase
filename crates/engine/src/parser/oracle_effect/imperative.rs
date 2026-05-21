@@ -3992,13 +3992,14 @@ fn that_player_library_filter(ctx: &ParseContext) -> TargetFilter {
 /// paths untouched.
 fn strip_exile_top_face_down(after_lib: &str) -> (&str, bool) {
     let trimmed = after_lib.trim_start();
-    if let Some(rest) = trimmed.strip_prefix("face down") {
-        // Accept ".", ",", whitespace, or end-of-clause as the boundary so we
-        // don't accidentally consume an identifier that merely begins with
-        // "face down...".
-        let next = rest.chars().next();
-        if matches!(next, None | Some('.') | Some(',') | Some(' ')) {
-            return (rest, true);
+    if let Ok((rest, _)) = tag::<_, _, OracleError<'_>>("face down").parse(trimmed) {
+        // Word-boundary check after the nom tag accepted: clause
+        // terminators (EOF, '.', ',') or a separator (' ') keep us from
+        // bleeding into a larger identifier. Not a parser dispatch — the
+        // dispatch was the `tag` above; this is post-tag validation.
+        match rest.chars().next() {
+            None | Some('.') | Some(',') | Some(' ') => return (rest, true),
+            _ => {}
         }
     }
     (after_lib, false)
