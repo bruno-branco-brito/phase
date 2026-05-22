@@ -124,21 +124,22 @@ fn apply_keyword_modification(
             upsert_keyword(keywords, keyword);
         }
         ContinuousModification::RemoveAllAbilities => keywords.clear(),
-        // CR 608.2d + CR 613.1f: Strip the keyword chosen at resolution
-        // time by discriminant — mirrors the `RemoveKeyword` arm above and
-        // the battlefield `RemoveChosenKeyword` arm in `layers.rs`. If the
-        // source has no stored chosen keyword (e.g., the static is
-        // gathered before the choose effect has resolved), this is a
-        // no-op rather than a panic, matching `layers.rs` semantics.
+        // CR 608.2d + CR 613.1f + CR 702.14: Strip the *exact* keyword
+        // chosen at resolution time — mirrors the battlefield
+        // `RemoveChosenKeyword` arm in `layers.rs`. Uses `PartialEq` rather
+        // than discriminant equality so that removing swampwalk leaves
+        // islandwalk intact (CR 702.14 treats each landwalk subtype as a
+        // distinct keyword). If the source has no stored chosen keyword
+        // (e.g. the static is gathered before the choose effect has
+        // resolved), this is a no-op rather than a panic, matching
+        // `layers.rs` semantics.
         ContinuousModification::RemoveChosenKeyword => {
             if let Some(kw) = state
                 .objects
                 .get(&effect.source_id)
                 .and_then(|src| src.chosen_keyword())
             {
-                keywords.retain(|existing| {
-                    std::mem::discriminant(existing) != std::mem::discriminant(kw)
-                });
+                keywords.retain(|existing| existing != kw);
             }
         }
         _ => {}

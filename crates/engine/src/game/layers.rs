@@ -2072,20 +2072,26 @@ fn apply_continuous_effect(state: &mut GameState, effect: &ActiveContinuousEffec
                     !KeywordTriggerInstaller::trigger_matches_keyword_kind(trigger, keyword)
                 });
             }
-            // CR 608.2d + CR 613.1f: Strip the keyword chosen at resolution
-            // time (read off the source's `chosen_attributes` above). Same
-            // discriminant-based stripping as `RemoveKeyword` — see that
-            // arm's comment for the rationale (chosen Landwalk("Swamp") will
-            // strip every Landwalk variant on the target, acceptable for v1
-            // because the source-of-truth at the choose layer was a single
-            // discriminant selection). If no keyword is currently stored on
-            // the source (e.g. the static is gathered before the choose
-            // effect has resolved), this is a no-op rather than a panic —
-            // mirrors the unresolved-attribute behavior of `AddChosenColor`.
+            // CR 608.2d + CR 613.1f + CR 702.14: Strip the *exact* keyword
+            // chosen at resolution time (read off the source's
+            // `chosen_attributes` above). Unlike the unparameterized
+            // `RemoveKeyword` arm, the chosen-keyword surface is concrete —
+            // `ChosenAttribute::Keyword(Landwalk("Swamp"))` is exactly
+            // swampwalk, not "any landwalk." CR 702.14 treats each landwalk
+            // subtype as a distinct keyword, so removing swampwalk must
+            // leave islandwalk intact. Use `PartialEq` (`k == kw`) rather
+            // than `std::mem::discriminant` to preserve that distinction.
+            // Triggers associated with the keyword kind (e.g. lifelink's
+            // lifegain hook) are still removed by `KeywordKind`, which is
+            // the granularity at which keyword-derived triggers are
+            // installed by `KeywordTriggerInstaller`. If no keyword is
+            // currently stored on the source (e.g. the static is gathered
+            // before the choose effect has resolved), this is a no-op
+            // rather than a panic — mirrors the unresolved-attribute
+            // behavior of `AddChosenColor`.
             ContinuousModification::RemoveChosenKeyword => {
                 if let Some(kw) = chosen_keyword.as_ref() {
-                    obj.keywords
-                        .retain(|k| std::mem::discriminant(k) != std::mem::discriminant(kw));
+                    obj.keywords.retain(|k| k != kw);
                     obj.trigger_definitions.retain(|trigger| {
                         !KeywordTriggerInstaller::trigger_matches_keyword_kind(trigger, kw)
                     });
@@ -4552,14 +4558,15 @@ mod tests {
         );
     }
 
-    // CR 608.2d + CR 702.14: Swampwalk is `Landwalk("Swamp")` — the choose
-    // surface emits a typed `Keyword::Landwalk(<subtype>)`, and the stripping
-    // arm uses discriminant equality so the parameterized variant is removed
-    // even though it carries a payload. Documents the v1 scoping: choosing
-    // any landwalk variant strips every landwalk on the target (acceptable
-    // per the plan's open-questions §1).
+    // CR 608.2d + CR 613.1f + CR 702.14: Swampwalk is `Landwalk("Swamp")`
+    // and is a *distinct* keyword from islandwalk per CR 702.14 — the
+    // chosen-keyword surface must remove only the exact parameterized
+    // variant chosen at resolution time, leaving other landwalk variants
+    // on the same creature intact. This test guards the `PartialEq`-based
+    // stripping in the `RemoveChosenKeyword` arm against future regression
+    // to discriminant-only matching.
     #[test]
-    fn test_remove_chosen_keyword_strips_swampwalk_via_discriminant() {
+    fn test_remove_chosen_keyword_strips_only_chosen_landwalk_variant() {
         use crate::types::ability::ChosenAttribute;
         use crate::types::keywords::Keyword;
 
@@ -4579,7 +4586,10 @@ mod tests {
             obj.timestamp = ts;
             obj.base_keywords
                 .push(Keyword::Landwalk("Swamp".to_string()));
+            obj.base_keywords
+                .push(Keyword::Landwalk("Island".to_string()));
             obj.keywords.push(Keyword::Landwalk("Swamp".to_string()));
+            obj.keywords.push(Keyword::Landwalk("Island".to_string()));
         }
         {
             let obj = state.objects.get_mut(&urborg).unwrap();
@@ -4600,9 +4610,13 @@ mod tests {
         let obj = state.objects.get(&target).unwrap();
         assert!(
             !obj.keywords
-                .iter()
-                .any(|k| matches!(k, Keyword::Landwalk(_))),
-            "RemoveChosenKeyword should strip every Landwalk variant by discriminant"
+                .contains(&Keyword::Landwalk("Swamp".to_string())),
+            "RemoveChosenKeyword should strip the chosen Swampwalk"
+        );
+        assert!(
+            obj.keywords
+                .contains(&Keyword::Landwalk("Island".to_string())),
+            "RemoveChosenKeyword must NOT strip the non-chosen Islandwalk (CR 702.14)"
         );
     }
 

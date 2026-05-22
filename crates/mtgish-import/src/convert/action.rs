@@ -3764,10 +3764,10 @@ pub fn convert(a: &Action) -> ConvResult<Effect> {
                     needed_variant: "empty CheckHasable option list".into(),
                 });
             }
-            let mut options = Vec::with_capacity(checkhasables.len());
-            for c in checkhasables.iter() {
-                options.push(static_effect::check_hasable_to_keyword_option(c)?);
-            }
+            let options: Vec<_> = checkhasables
+                .iter()
+                .map(static_effect::check_hasable_to_keyword_option)
+                .collect::<ConvResult<_>>()?;
             Effect::Choose {
                 choice_type: ChoiceType::Keyword { options },
                 persist: true,
