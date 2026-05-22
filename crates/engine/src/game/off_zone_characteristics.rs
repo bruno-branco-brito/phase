@@ -97,6 +97,12 @@ fn supports_off_zone_keyword_query(modification: &ContinuousModification) -> boo
             | ContinuousModification::RemoveKeyword { .. }
             | ContinuousModification::AddDynamicKeyword { .. }
             | ContinuousModification::RemoveAllAbilities
+            // CR 608.2d + CR 613.1f: `RemoveChosenKeyword` strips by
+            // discriminant the keyword stored in the source's
+            // `chosen_attributes` (Urborg / Walking Sponge). Same off-zone
+            // applicability as `RemoveKeyword` — the granted/printed keyword
+            // it targets may live on an object outside the battlefield.
+            | ContinuousModification::RemoveChosenKeyword
     )
 }
 
@@ -118,6 +124,22 @@ fn apply_keyword_modification(
             upsert_keyword(keywords, keyword);
         }
         ContinuousModification::RemoveAllAbilities => keywords.clear(),
+        // CR 608.2d + CR 613.1f: Strip the keyword chosen at resolution
+        // time by discriminant — mirrors the `RemoveKeyword` arm above and
+        // the battlefield `RemoveChosenKeyword` arm in `layers.rs`. If the
+        // source has no stored chosen keyword (e.g., the static is
+        // gathered before the choose effect has resolved), this is a
+        // no-op rather than a panic, matching `layers.rs` semantics.
+        ContinuousModification::RemoveChosenKeyword => {
+            if let Some(kw) = state
+                .objects
+                .get(&effect.source_id)
+                .and_then(|src| src.chosen_keyword())
+            {
+                keywords
+                    .retain(|existing| std::mem::discriminant(existing) != std::mem::discriminant(kw));
+            }
+        }
         _ => {}
     }
 }
