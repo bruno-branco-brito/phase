@@ -136,8 +136,9 @@ fn apply_keyword_modification(
                 .get(&effect.source_id)
                 .and_then(|src| src.chosen_keyword())
             {
-                keywords
-                    .retain(|existing| std::mem::discriminant(existing) != std::mem::discriminant(kw));
+                keywords.retain(|existing| {
+                    std::mem::discriminant(existing) != std::mem::discriminant(kw)
+                });
             }
         }
         _ => {}

@@ -107,7 +107,7 @@ pub enum OpponentMayScope {
 }
 
 /// What kind of named choice the player must make at resolution time.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChoiceType {
     CreatureType,
     Color {
