@@ -5278,6 +5278,7 @@ fn apply_player_target(effect: Effect, target_filter: TargetFilter) -> ConvResul
             count,
             reveal,
             selection_constraint,
+            split,
             ..
         } => Effect::SearchLibrary {
             filter,
@@ -5285,6 +5286,7 @@ fn apply_player_target(effect: Effect, target_filter: TargetFilter) -> ConvResul
             reveal,
             target_player: Some(target_filter),
             selection_constraint,
+            split,
         },
         // No player-target slot on this effect. Strict-fail so the
         // shape-mismatch surfaces in the report rather than silently
@@ -5853,6 +5855,7 @@ fn convert_search_library(actions: &[SearchLibraryAction]) -> ConvResult<Vec<Eff
         reveal,
         target_player: None,
         selection_constraint,
+        split: None,
     });
     out.push(Effect::ChangeZone {
         origin: Some(Zone::Library),
@@ -5914,6 +5917,7 @@ fn convert_multi_filter_search_library(
             reveal,
             target_player: None,
             selection_constraint: SearchSelectionConstraint::None,
+            split: None,
         });
         out.push(Effect::ChangeZone {
             origin: Some(Zone::Library),
