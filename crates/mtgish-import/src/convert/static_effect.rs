@@ -18,8 +18,8 @@ use crate::convert::{
     action, build_ability_from_actions, condition, cost, filter, quantity, trigger,
 };
 use crate::schema::types::{
-    CardType, CheckHasable, Condition, Expiration, LayerEffect, ModX, Permanent, Permanents,
-    Player, Players, Rule, SettableColor, SimpleColor, StaticLayerEffect, PT,
+    CardType, CheckHasable, Condition, Expiration, LayerEffect, ModX, Permanent, Player, Players,
+    Rule, SettableColor, SimpleColor, StaticLayerEffect, PT,
 };
 
 /// CR 613: Convert one `StaticLayerEffect` into one or more engine
