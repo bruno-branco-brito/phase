@@ -1368,7 +1368,9 @@ impl fmt::Display for Keyword {
                 "Swamp" => write!(f, "Swampwalk"),
                 "Mountain" => write!(f, "Mountainwalk"),
                 "Forest" => write!(f, "Forestwalk"),
-                "Legendary" | "Nonbasic" | "Snow" => write!(f, "{subtype} Landwalk"),
+                "Legendary" | "Nonbasic" | "Snow" | "Artifact" => {
+                    write!(f, "{subtype} Landwalk")
+                }
                 other => write!(f, "{other}walk"),
             },
             Keyword::Flying => write!(f, "Flying"),
