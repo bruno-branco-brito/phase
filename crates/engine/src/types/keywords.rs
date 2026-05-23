@@ -2303,6 +2303,22 @@ mod tests {
     }
 
     #[test]
+    fn display_landwalk_uses_oracle_spelling_for_subtypes_and_card_types() {
+        assert_eq!(
+            Keyword::Landwalk("Island".to_string()).to_string(),
+            "Islandwalk"
+        );
+        assert_eq!(
+            Keyword::Landwalk("Snow".to_string()).to_string(),
+            "Snow Landwalk"
+        );
+        assert_eq!(
+            Keyword::Landwalk("Artifact".to_string()).to_string(),
+            "Artifact Landwalk"
+        );
+    }
+
+    #[test]
     fn parse_parameterized_keywords_as_mana_cost() {
         // Cost-bearing keywords now parse to ManaCost
         let kicker = Keyword::from_str("Kicker:1G").unwrap();
