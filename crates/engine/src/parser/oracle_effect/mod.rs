@@ -32012,8 +32012,9 @@ mod tests {
         assert_eq!(scope, PlayerFilter::All);
         assert_eq!(body, "discards a card");
 
-        let (scope, body) = strip_each_scope_who_cant_subject("each player who cannot discards a card")
-            .expect("each player who cannot");
+        let (scope, body) =
+            strip_each_scope_who_cant_subject("each player who cannot discards a card")
+                .expect("each player who cannot");
         assert_eq!(scope, PlayerFilter::All);
         assert_eq!(body, "discards a card");
 

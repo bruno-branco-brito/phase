@@ -60,8 +60,7 @@ use engine::types::identifiers::{CardId, ObjectId};
 use engine::types::player::PlayerId;
 use engine::types::zones::Zone;
 
-const ETB_BODY: &str =
-    "each player sacrifices a creature or planeswalker of their choice. Each \
+const ETB_BODY: &str = "each player sacrifices a creature or planeswalker of their choice. Each \
      player who can't discards a card.";
 
 fn plaguecrafter_etb(controller: PlayerId, source_id: ObjectId) -> ResolvedAbility {
