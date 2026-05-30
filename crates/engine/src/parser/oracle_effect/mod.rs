@@ -16054,13 +16054,14 @@ fn rebind_decline_body_recipients(clause: &mut ParsedEffectClause) {
 /// one who couldn't perform the predicate), not to the printed ability
 /// controller. Rewrite Controller → ScopedPlayer.
 ///
-/// PARALLEL INVERSE to `rebind_decline_body_recipient`:
-///   - this:  Controller → ScopedPlayer  (subject-only "each X who can't")
-///   - that:  Controller → OriginalController  (prepositional "for each
-///            opponent who doesn't" — "you" stays "you" inside an Opponent-
-///            scoped iteration)
-/// Same five-variant surface: { LoseLife, Draw, Discard, Mill, Token }.
-/// Sacrifice is NOT covered (it carries its own target on the parent node).
+/// PARALLEL INVERSE to `rebind_decline_body_recipient`: this rewrites
+/// `Controller → ScopedPlayer` (subject-only "each X who can't"), whereas
+/// the prepositional walker rewrites `Controller → OriginalController`
+/// ("for each opponent who doesn't" — "you" stays "you" inside an
+/// Opponent-scoped iteration).
+///
+/// Same five-variant surface: `{ LoseLife, Draw, Discard, Mill, Token }`.
+/// `Sacrifice` is NOT covered (it carries its own target on the parent node).
 fn rebind_subject_only_body_recipient(effect: &mut Effect) {
     fn rebind(filter: &mut TargetFilter) {
         if matches!(filter, TargetFilter::Controller) {
