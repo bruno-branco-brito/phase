@@ -52,8 +52,7 @@ use engine::types::identifiers::{CardId, ObjectId};
 use engine::types::player::PlayerId;
 use engine::types::zones::Zone;
 
-const LILIANA_PLUS_ONE: &str =
-    "each player discards a card. Each opponent who can't loses 3 life.";
+const LILIANA_PLUS_ONE: &str = "each player discards a card. Each opponent who can't loses 3 life.";
 
 fn liliana_plus_one(controller: PlayerId, source_id: ObjectId) -> ResolvedAbility {
     let def = parse_effect_chain(LILIANA_PLUS_ONE, AbilityKind::Activated);

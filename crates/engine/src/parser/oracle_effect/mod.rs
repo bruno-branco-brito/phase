@@ -16071,10 +16071,7 @@ fn rebind_decline_body_recipient(effect: &mut Effect) {
 /// `Controller → ScopedPlayer`). Replaces the previous byte-for-byte
 /// duplicated `rebind_decline_body_recipients` / `rebind_subject_only_body_recipients`
 /// pair — the two walkers differed only in which leaf function they called.
-fn rebind_clause_recipients_with(
-    clause: &mut ParsedEffectClause,
-    rebind: impl Fn(&mut Effect),
-) {
+fn rebind_clause_recipients_with(clause: &mut ParsedEffectClause, rebind: impl Fn(&mut Effect)) {
     rebind(&mut clause.effect);
     let mut cursor = clause.sub_ability.as_deref_mut();
     while let Some(node) = cursor {
