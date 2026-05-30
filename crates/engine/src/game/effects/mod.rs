@@ -4585,7 +4585,17 @@ fn scoped_player_matches_filter(
     candidate: PlayerId,
     filter: &PlayerFilter,
 ) -> bool {
-    let controller = ability.controller;
+    // CR 109.5: During a `player_scope` iteration the driver rebinds
+    // `ability.controller = scoped_player` (effects/mod.rs:2884) so that
+    // body effects whose leaf target is `Controller` resolve to the
+    // iterated player. The decline-clause scope filter, however, evaluates
+    // "Opponent of whom" relative to the PRINTED controller — the canonical
+    // idiom used by `quantity.rs` (see `original_controller.unwrap_or(controller)`
+    // at quantity.rs:479,514,530,721). Without this fallback, `Opponent`
+    // here would evaluate `candidate != iterated_player` and short-circuit
+    // to false for every per-iteration call, silently dropping cross-scope
+    // bodies (e.g. Liliana, Waker of the Dead [+1]).
+    let controller = ability.original_controller.unwrap_or(ability.controller);
     match filter {
         PlayerFilter::Controller => candidate == controller,
         PlayerFilter::Opponent => candidate != controller,
