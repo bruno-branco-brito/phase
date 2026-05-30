@@ -13227,14 +13227,16 @@ pub(crate) fn parse_effect_chain_ir(
         // shapes (prepositional vs subject-only × optional `doesn't` vs
         // mandatory `can't`) into a body that runs only when the parent's
         // per-iteration action did NOT happen. Track which quadrant dispatched
-        // so the recipient-rebinding walker fires on the right axis:
-        //   - Prepositional ("for each opponent who …, <body>") rebinds via
-        //     `rebind_decline_body_recipients` (Controller → OriginalController).
-        //   - SubjectOnly ("each <scope> who can't, <body>") rebinds via
-        //     `rebind_subject_only_body_recipients` (Controller → ScopedPlayer).
-        // Both walkers run on every chunk while the sticky
+        // so the recipient-rebinding walker fires on the right axis. Both
+        // paths share the single `rebind_clause_recipients_with` walker; the
+        // per-quadrant mapping is the leaf rebinder:
+        //   - Prepositional ("for each opponent who …, <body>") uses
+        //     `rebind_decline_body_recipient` (Controller → OriginalController).
+        //   - SubjectOnly ("each <scope> who can't, <body>") uses
+        //     `rebind_subject_only_body_recipient` (Controller → ScopedPlayer).
+        // Both leaf rebinders run on every chunk while the sticky
         // `decline_consequence_active` flag remains set, so only the kind
-        // (which walker) needs to be tracked — no head bit.
+        // (which leaf rebinder) needs to be tracked — no head bit.
         #[derive(Copy, Clone)]
         enum DeclineDispatch {
             None,
@@ -13266,13 +13268,13 @@ pub(crate) fn parse_effect_chain_ir(
                     }),
                     DeclineDispatch::Prepositional,
                 )
-            } else if let Some((_scope, body)) = strip_each_scope_who_cant_subject(&text) {
+            } else if let Some((scope, body)) = strip_each_scope_who_cant_subject(&text) {
                 // CR 608.2c + CR 101.3 + CR 118.12: subject-only
                 // mandatory-impossible decline-tail (Plaguecrafter:
                 // "each player sacrifices …. Each player who can't discards a
                 // card."). Retarget the preceding clause's Sentence boundary
                 // to Then so this clause lowers as a within-action
-                // ContinuationStep, then stamp the Not gate.
+                // ContinuationStep, then stamp the And-of-two-conjuncts gate.
                 //
                 // Do NOT stamp `player_scope = Some(scope)` here — the body
                 // inherits the parent's per-player iteration by being
@@ -13282,21 +13284,43 @@ pub(crate) fn parse_effect_chain_ir(
                 // via `strip_player_scope_subject`, so a second stamp here
                 // would start a nested per-player fan-out that resets
                 // `cost_payment_failed_flag` for each inner iteration —
-                // exactly the failure mode `_scope` is left unstamped to
-                // avoid. The bound is retained for documentation only.
-                // Parallel to `strip_for_each_opponent_who_doesnt` above.
+                // exactly the failure mode the second stamp is omitted to
+                // avoid. Parallel to `strip_for_each_opponent_who_doesnt`
+                // above.
+                //
+                // CR 101.3 + CR 109.5: The body's gate has TWO conjuncts:
+                //   (a) `Not{IfCurrentScopeSucceeded}` — fires only on
+                //       iterations whose mandatory parent action failed
+                //       (the canonical "who can't" filter from CR 101.3).
+                //   (b) `ScopedPlayerMatches { filter: scope }` — fires only
+                //       on iterations whose scoped player matches the
+                //       decline clause's OWN PlayerFilter, relative to the
+                //       ability controller.
+                //
+                // Conjunct (b) is the cross-scope fix (Liliana, Waker of the
+                // Dead: parent "each player discards a card" iterates `All`,
+                // decline clause "each opponent who can't loses 3 life"
+                // filters to `Opponent`; without (b) the controller would
+                // lose 3 life if they couldn't discard, violating CR 109.5).
+                // For same-scope cards (Plaguecrafter, Entropic Battlecruiser,
+                // Skull Storm, Momentum Breaker, Lurking Spinecrawler — parent
+                // and decline share the scope) the `ScopedPlayerMatches`
+                // conjunct is trivially true for every iteration and acts as
+                // a no-op, so this is uniformly safe for the whole class.
                 if let Some(prev) = clauses.last_mut() {
                     if prev.boundary == Some(ClauseBoundary::Sentence) {
                         prev.boundary = Some(ClauseBoundary::Then);
                     }
                 }
-                (
-                    body,
-                    Some(AbilityCondition::Not {
-                        condition: Box::new(AbilityCondition::current_scope_succeeded()),
-                    }),
-                    DeclineDispatch::SubjectOnly,
-                )
+                let condition = AbilityCondition::And {
+                    conditions: vec![
+                        AbilityCondition::Not {
+                            condition: Box::new(AbilityCondition::current_scope_succeeded()),
+                        },
+                        AbilityCondition::ScopedPlayerMatches { filter: scope },
+                    ],
+                };
+                (body, Some(condition), DeclineDispatch::SubjectOnly)
             } else {
                 (text, condition, DeclineDispatch::None)
             };
@@ -13653,10 +13677,10 @@ pub(crate) fn parse_effect_chain_ir(
         //     Controller → ScopedPlayer so the body's implicit recipient binds
         //     to the per-iteration player who couldn't perform the predicate.
         if matches!(decline_dispatch, DeclineDispatch::SubjectOnly) {
-            rebind_subject_only_body_recipients(&mut clause);
+            rebind_clause_recipients_with(&mut clause, rebind_subject_only_body_recipient);
         }
         if is_decline_consequence {
-            rebind_decline_body_recipients(&mut clause);
+            rebind_clause_recipients_with(&mut clause, rebind_decline_body_recipient);
         }
         if inherits_carried_targeted_player_subject {
             if let Some(subject) = carried_targeted_player_subject.as_ref() {
@@ -16037,14 +16061,24 @@ fn rebind_decline_body_recipient(effect: &mut Effect) {
     }
 }
 
-/// CR 109.5: Walk a decline-consequence body chain (`effect` + every
-/// `sub_ability` descendant) and rebind each recipient-bearing node so "that
-/// player"/"you" resolve relative to the per-opponent iteration.
-fn rebind_decline_body_recipients(clause: &mut ParsedEffectClause) {
-    rebind_decline_body_recipient(&mut clause.effect);
+/// CR 109.5: Walk a decline-body chain (`effect` + every `sub_ability`
+/// descendant) and apply `rebind` to each node's `effect`. Single shared
+/// walker; the per-quadrant mapping is supplied as the leaf rebinder.
+///
+/// Used by both the prepositional decline path
+/// (`rebind_decline_body_recipient`: `Controller → OriginalController`) and
+/// the subject-only decline path (`rebind_subject_only_body_recipient`:
+/// `Controller → ScopedPlayer`). Replaces the previous byte-for-byte
+/// duplicated `rebind_decline_body_recipients` / `rebind_subject_only_body_recipients`
+/// pair — the two walkers differed only in which leaf function they called.
+fn rebind_clause_recipients_with(
+    clause: &mut ParsedEffectClause,
+    rebind: impl Fn(&mut Effect),
+) {
+    rebind(&mut clause.effect);
     let mut cursor = clause.sub_ability.as_deref_mut();
     while let Some(node) = cursor {
-        rebind_decline_body_recipient(&mut node.effect);
+        rebind(&mut node.effect);
         cursor = node.sub_ability.as_deref_mut();
     }
 }
@@ -16078,18 +16112,6 @@ fn rebind_subject_only_body_recipient(effect: &mut Effect) {
         | Effect::Mill { target, .. } => rebind(target),
         Effect::Token { owner, .. } => rebind(owner),
         _ => {}
-    }
-}
-
-/// CR 109.5: Walk a subject-only decline body chain (`effect` + every
-/// `sub_ability` descendant) and rebind each recipient-bearing node so the
-/// body's implicit recipient binds to the per-iteration scoped player.
-fn rebind_subject_only_body_recipients(clause: &mut ParsedEffectClause) {
-    rebind_subject_only_body_recipient(&mut clause.effect);
-    let mut cursor = clause.sub_ability.as_deref_mut();
-    while let Some(node) = cursor {
-        rebind_subject_only_body_recipient(&mut node.effect);
-        cursor = node.sub_ability.as_deref_mut();
     }
 }
 
@@ -32109,19 +32131,35 @@ mod tests {
             "the sacrifice iterates per player"
         );
 
-        // Decline body: Discard, gated on Not{IfCurrentScopeSucceeded},
+        // Decline body: Discard, gated on
+        // `And { [Not{IfCurrentScopeSucceeded}, ScopedPlayerMatches(All)] }`,
         // recipient rewritten Controller → ScopedPlayer so the discard
         // applies to the per-iteration player who couldn't sacrifice.
+        //
+        // Plaguecrafter is the same-scope class: parent and decline both
+        // iterate `All`, so the `ScopedPlayerMatches(All)` conjunct is
+        // trivially true for every iteration. The conjunct is load-bearing
+        // for cross-scope cards (Liliana, Waker of the Dead — parent `All`,
+        // decline `Opponent`); pinning it here documents the same-scope
+        // no-op invariant and protects against a future regression that
+        // drops it.
         let discard = def
             .sub_ability
             .as_ref()
             .expect("sacrifice should chain to the decline body");
         assert_eq!(
             discard.condition,
-            Some(AbilityCondition::Not {
-                condition: Box::new(AbilityCondition::current_scope_succeeded())
+            Some(AbilityCondition::And {
+                conditions: vec![
+                    AbilityCondition::Not {
+                        condition: Box::new(AbilityCondition::current_scope_succeeded()),
+                    },
+                    AbilityCondition::ScopedPlayerMatches {
+                        filter: PlayerFilter::All,
+                    },
+                ],
             }),
-            "Plaguecrafter's discard body fires only for the per-iteration player whose mandatory sacrifice failed"
+            "Plaguecrafter's discard body fires only for the per-iteration player whose mandatory sacrifice failed AND whose scope matches the decline clause's PlayerFilter (here `All`, trivially true)"
         );
         assert_eq!(
             discard.sub_link,
@@ -32142,6 +32180,82 @@ mod tests {
                 );
             }
             other => panic!("expected Discard, got {other:?}"),
+        }
+    }
+
+    /// CR 101.3 + CR 109.5: Liliana, Waker of the Dead [+1]:
+    /// "Each player discards a card. Each opponent who can't loses 3 life."
+    ///
+    /// The parent's `player_scope` is `All` ("each player") but the decline
+    /// clause's own scope is `Opponent` ("each opponent who can't") — they
+    /// DIFFER. This is the discriminating cross-scope case maintainer review
+    /// flagged: without the `ScopedPlayerMatches` conjunct, the body would
+    /// inherit the parent's `All` iteration and fire for the controller too —
+    /// the controller would lose 3 life if they couldn't discard, violating
+    /// CR 109.5 (CR restricts it to opponents per the printed scope of the
+    /// decline clause).
+    ///
+    /// The fix encodes the gate as
+    /// `And { [Not{IfCurrentScopeSucceeded}, ScopedPlayerMatches(Opponent)] }`
+    /// — the body fires only when (a) the parent's per-iteration action
+    /// failed AND (b) the iterated player matches `Opponent` relative to the
+    /// controller. The companion Plaguecrafter test
+    /// (`plaguecrafter_etb_lowers_subject_only_decline_tail`) pins the
+    /// same-scope class where the new conjunct is `ScopedPlayerMatches(All)`
+    /// — trivially true and safe.
+    #[test]
+    fn liliana_waker_of_the_dead_plus_one_cross_scope_decline_tail() {
+        let def = parse_effect_chain(
+            "each player discards a card. Each opponent who can't loses 3 life.",
+            AbilityKind::Activated,
+        );
+
+        // Root: each player discards — player_scope: All (each player).
+        assert!(matches!(*def.effect, Effect::Discard { .. }));
+        assert_eq!(
+            def.player_scope,
+            Some(PlayerFilter::All),
+            "the parent discard iterates per player"
+        );
+
+        // Decline body: LoseLife(3), gated on
+        // `And { [Not{IfCurrentScopeSucceeded}, ScopedPlayerMatches(Opponent)] }`.
+        let lose_life = def
+            .sub_ability
+            .as_ref()
+            .expect("discard should chain to the decline body");
+        assert_eq!(
+            lose_life.condition,
+            Some(AbilityCondition::And {
+                conditions: vec![
+                    AbilityCondition::Not {
+                        condition: Box::new(AbilityCondition::current_scope_succeeded()),
+                    },
+                    AbilityCondition::ScopedPlayerMatches {
+                        filter: PlayerFilter::Opponent,
+                    },
+                ],
+            }),
+            "Liliana's decline body fires only on iterations where (a) the parent discard failed AND (b) the iterated player matches `Opponent` — the cross-scope fix (parent `All`, decline `Opponent`)"
+        );
+        assert_eq!(
+            lose_life.player_scope, None,
+            "the body inherits the parent's per-player iteration instead of stamping its own loop"
+        );
+        // The body's recipient is rewritten to ScopedPlayer (subject-only
+        // rebind: Controller → ScopedPlayer applies whichever scope the
+        // decline-tail uses; the `ScopedPlayerMatches` conjunct narrows the
+        // iterations that pass the gate).
+        match &*lose_life.effect {
+            Effect::LoseLife { amount, target } => {
+                assert_eq!(*amount, QuantityExpr::Fixed { value: 3 });
+                assert_eq!(
+                    target,
+                    &Some(TargetFilter::ScopedPlayer),
+                    "the body's implicit recipient binds to the per-iteration scoped player"
+                );
+            }
+            other => panic!("expected LoseLife, got {other:?}"),
         }
     }
 

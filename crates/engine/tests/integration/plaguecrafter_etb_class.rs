@@ -11,11 +11,17 @@
 //!     "can't" sacrifice.
 //!   - CR 109.5: The body's implicit recipient ("discards a card" with no
 //!     stated subject) binds to the per-iteration scoped player, not the
-//!     printed ability controller — `rebind_subject_only_body_recipients`
-//!     rewrites `Discard.target` from `Controller` → `ScopedPlayer`.
+//!     printed ability controller — the shared
+//!     `rebind_clause_recipients_with(_, rebind_subject_only_body_recipient)`
+//!     walker rewrites `Discard.target` from `Controller` → `ScopedPlayer`.
 //!   - CR 118.12 (mandatory-cost branch): The "can't" relative-clause is the
 //!     subject-only sibling of the prepositional "For each opponent who
-//!     can't, …" — both gate on `Not{IfCurrentScopeSucceeded}`.
+//!     can't, …" — both gate on `Not{IfCurrentScopeSucceeded}`. Plaguecrafter
+//!     is the same-scope class: the parent's `player_scope: All` and the
+//!     decline clause's PlayerFilter `All` agree, so the
+//!     `ScopedPlayerMatches(All)` conjunct that fires for every iteration is
+//!     trivially true. Cross-scope cards (Liliana, Waker of the Dead — parent
+//!     `All`, decline `Opponent`) rely on that conjunct for correctness.
 //!   - CR 608.2c: Each scoped iteration is a fresh sub-resolution; the
 //!     per-iteration `cost_payment_failed_flag` reset (effects/mod.rs driver
 //!     loop) is the load-bearing invariant that keeps a prior player's
@@ -29,8 +35,9 @@
 //! AST shape (verified by the parser unit test in
 //! `parser/oracle_effect/mod.rs::plaguecrafter_etb_lowers_subject_only_decline_tail`):
 //!   `Sacrifice { player_scope: All }` → `sub_ability: Discard {
-//!   condition: Not{IfCurrentScopeSucceeded}, target: ScopedPlayer,
-//!   sub_link: ContinuationStep, player_scope: All }`.
+//!   condition: And { [Not{IfCurrentScopeSucceeded},
+//!   ScopedPlayerMatches(All)] }, target: ScopedPlayer,
+//!   sub_link: ContinuationStep, player_scope: None (inherits parent) }`.
 //!
 //! Test: 2 players, discriminating setup.
 //!   - Controller (P0) — has 1 creature on the battlefield and 2 cards in
@@ -122,10 +129,10 @@ fn hand_len(state: &GameState, player: PlayerId) -> usize {
 /// creature, so the flag stays false for P0's iteration and P0 does not
 /// discard.
 ///
-/// This regression guards the parser's recipient rewrite via
-/// `rebind_subject_only_body_recipients`: without it, the discard would
-/// target the printed controller, so P0 would discard regardless of who
-/// could/couldn't sacrifice.
+/// This regression guards the parser's recipient rewrite via the shared
+/// `rebind_clause_recipients_with(_, rebind_subject_only_body_recipient)`
+/// walker: without it, the discard would target the printed controller, so
+/// P0 would discard regardless of who could/couldn't sacrifice.
 #[test]
 fn plaguecrafter_only_player_who_cant_sacrifice_discards() {
     let mut state = GameState::new(FormatConfig::standard(), 2, 42);

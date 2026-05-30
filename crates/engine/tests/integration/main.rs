@@ -66,6 +66,7 @@ mod kaito_integration;
 mod kodama_anti_recursion_intervening_if;
 mod krark_clan_ironworks_castability;
 mod leyline_taps_for_mana_repro;
+mod liliana_waker_cross_scope_decline;
 mod louisoix_sacrifice_counter;
 mod madame_null_integration;
 mod magnetic_mountain_choose_and_pay;
