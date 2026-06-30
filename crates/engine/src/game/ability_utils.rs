@@ -2648,7 +2648,12 @@ pub(crate) fn filter_references_target_player(filter: &TargetFilter) -> bool {
 /// `TriggeringPlayer`). The declared-target forms are the only player-typed `Typed`
 /// payers with empty type filters/properties and a None/Opponent controller; no
 /// anaphoric path emits that shape, so the match is unambiguous.
-fn payer_is_declared_target(payer: &TargetFilter) -> bool {
+///
+/// Single authority for the declared-target shape: slot creation here, the
+/// payer resolver in `effects::resolve_unless_payer`, and the `Typed` arm in
+/// `targeting::resolve_effect_player_ref` all gate on this one predicate so the
+/// structural guard cannot drift as new parser shapes are added.
+pub(crate) fn payer_is_declared_target(payer: &TargetFilter) -> bool {
     matches!(
         payer,
         TargetFilter::Typed(tf)
