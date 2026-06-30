@@ -7996,11 +7996,12 @@ fn resolve_unless_payer(
         }
         // CR 115.1 + CR 118.12a: a payer DECLARED as a target inside the unless
         // clause ("unless target opponent/target player pays") resolves to the
-        // player chosen at trigger stack placement, read from `ability.targets`
-        // (same as the anaphoric `Player` arm's resolution). Gated on the
-        // declared-target shape so it stays mutually exclusive with other `Typed`
-        // payer handling (e.g. the `ChosenPlayer` arm in `resolve_effect_player_ref`).
-        payer if crate::game::ability_utils::payer_is_declared_target(payer) => {
+        // player chosen at stack placement, read from `ability.targets` (same as
+        // the anaphoric `Player` arm's resolution). `payer_is_declared_target` is
+        // the single authority for the declared-target shape (shared with slot
+        // creation in `ability_utils` and the resolver arm in `targeting`), so it
+        // stays mutually exclusive with the `ChosenPlayer` `Typed` arm there.
+        _ if crate::game::ability_utils::payer_is_declared_target(payer) => {
             crate::game::targeting::resolve_effect_player_ref(state, ability, payer)
         }
         _ => None,
