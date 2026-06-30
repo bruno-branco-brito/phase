@@ -16,8 +16,7 @@
 //!   * CR 115.1   — targets are declared as the spell/ability goes on the stack.
 //!   * CR 118.12a — "[Do something] unless [a player does something else]."
 //!   * CR 119.4   — paying life loses that much life.
-//!   * CR 603.3d  — a triggered ability with no legal target is removed from the
-//!                  stack.
+//!   * CR 603.3d  — a triggered ability with no legal target is removed from the stack.
 
 use engine::game::scenario::{GameScenario, P0, P1};
 use engine::game::triggers::process_triggers;
