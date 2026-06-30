@@ -23811,6 +23811,20 @@ fn parse_resolution_unless_payer(input: &str) -> OracleResult<'_, TargetFilter> 
             // controller (Stench of Evil, Fade Away) rather than a player
             // target (Flay).
             value(TargetFilter::Player, tag("they pay ")),
+            // CR 115.1 + CR 118.12a: declared-target payer "target opponent/target
+            // player pays {cost}" (resolution-side parity with the trigger-side
+            // arm). Distinct from the anaphoric "they pay" (-> Player) above: the
+            // payer is the player declared as a target inside the unless clause,
+            // resolved from `ability.targets`. The `Typed` shape passes through the
+            // caller's `payer == Player` remap unmodified.
+            value(
+                TargetFilter::Typed(TypedFilter::default().controller(ControllerRef::Opponent)),
+                tag("target opponent pays "),
+            ),
+            value(
+                TargetFilter::Typed(TypedFilter::default()),
+                tag("target player pays "),
+            ),
             // CR 118.12a: "unless any player pays ..." — every player is polled
             // in APNAP order; the first to pay prevents the effect (Cleansing,
             // the Rhystic cycle, Soul Strings).
@@ -60989,6 +61003,79 @@ mod tests {
             );
         };
         assert_eq!(name, "Fish", "outer token is the 3/3 Fish");
+    }
+
+    /// CR 115.1 + CR 118.12a: resolution-side parity with the trigger arm —
+    /// "destroy target creature unless target player pays 2 life" surfaces a
+    /// declared-target `Typed` payer (no type/property filters, no controller —
+    /// "target player" enumerates all players) and a `PayLife { 2 }` cost.
+    #[test]
+    fn resolution_unless_target_player_pays_life() {
+        let (cleaned, modifier) = extract_resolution_unless_pay_modifier(
+            "Destroy target creature unless target player pays 2 life.",
+            None,
+        );
+        let modifier = modifier.expect("declared-target unless-pay must be extracted");
+        assert_eq!(
+            modifier.payer,
+            TargetFilter::Typed(TypedFilter::default()),
+            "\"target player\" is a controller-less declared-target Typed (all players)"
+        );
+        assert_eq!(
+            modifier.cost,
+            AbilityCost::PayLife {
+                amount: QuantityExpr::Fixed { value: 2 }
+            },
+            "cost must be PayLife 2, got {:?}",
+            modifier.cost
+        );
+        assert_eq!(
+            cleaned.trim_end_matches('.'),
+            "Destroy target creature",
+            "the unless clause must be stripped from the body"
+        );
+    }
+
+    /// CR 115.1 + CR 118.12a: "target opponent pays {cost}" yields an
+    /// opponent-scoped declared-target `Typed` payer.
+    #[test]
+    fn resolution_unless_target_opponent_pays_life() {
+        let (_, modifier) = extract_resolution_unless_pay_modifier(
+            "Destroy target creature unless target opponent pays 3 life.",
+            None,
+        );
+        let modifier = modifier.expect("declared-target unless-pay must be extracted");
+        assert_eq!(
+            modifier.payer,
+            TargetFilter::Typed(TypedFilter::default().controller(ControllerRef::Opponent)),
+            "\"target opponent\" carries the Opponent controller"
+        );
+    }
+
+    /// Negative guards: the existing anaphoric/scope payers must be unchanged by
+    /// the new declared-target arms. "any player pays" stays `AllPlayers`;
+    /// "you pay" stays `Controller`.
+    #[test]
+    fn resolution_unless_anaphoric_payers_unchanged() {
+        let (_, any) = extract_resolution_unless_pay_modifier(
+            "Destroy target creature unless any player pays 3 life.",
+            None,
+        );
+        assert_eq!(
+            any.expect("any-player unless-pay").payer,
+            TargetFilter::AllPlayers,
+            "\"any player pays\" must stay AllPlayers"
+        );
+
+        let (_, you) = extract_resolution_unless_pay_modifier(
+            "Draw a card unless you pay 2 life.",
+            None,
+        );
+        assert_eq!(
+            you.expect("you-pay unless-pay").payer,
+            TargetFilter::Controller,
+            "\"you pay\" must stay Controller"
+        );
     }
 }
 

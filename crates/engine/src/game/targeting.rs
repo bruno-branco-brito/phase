@@ -1077,6 +1077,22 @@ pub fn resolve_effect_player_ref(
             let index = filter.chosen_player_index().expect("checked by guard");
             ability.chosen_players.get(index as usize).copied()
         }
+        // CR 115.1 + CR 118.12a: a payer DECLARED as a target inside an unless
+        // clause ("unless target opponent/target player pays") resolves to the
+        // player chosen at trigger stack placement — read from `ability.targets`,
+        // identically to the anaphoric `Player` arm above. Gated on the
+        // declared-target shape (empty type filters/properties, None/Opponent
+        // controller) so it never collides with the `ChosenPlayer` arm.
+        TargetFilter::Typed(tf)
+            if tf.type_filters.is_empty()
+                && tf.properties.is_empty()
+                && matches!(tf.controller, None | Some(ControllerRef::Opponent)) =>
+        {
+            ability.targets.iter().find_map(|target| match target {
+                TargetRef::Player(player) => Some(*player),
+                _ => None,
+            })
+        }
         _ => resolve_event_context_target(state, filter, ability.source_id).and_then(|target| {
             match target {
                 TargetRef::Player(player) => Some(player),

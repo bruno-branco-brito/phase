@@ -7959,6 +7959,19 @@ fn resolve_unless_payer(
         TargetFilter::ScopedPlayer => {
             crate::game::targeting::resolve_effect_player_ref(state, ability, payer)
         }
+        // CR 115.1 + CR 118.12a: a payer DECLARED as a target inside the unless
+        // clause ("unless target opponent/target player pays") resolves to the
+        // player chosen at trigger stack placement, read from `ability.targets`
+        // (same as the anaphoric `Player` arm's resolution). Gated on the
+        // declared-target shape so it stays mutually exclusive with other `Typed`
+        // payer handling (e.g. the `ChosenPlayer` arm in `resolve_effect_player_ref`).
+        TargetFilter::Typed(tf)
+            if tf.type_filters.is_empty()
+                && tf.properties.is_empty()
+                && matches!(tf.controller, None | Some(ControllerRef::Opponent)) =>
+        {
+            crate::game::targeting::resolve_effect_player_ref(state, ability, payer)
+        }
         _ => None,
     }
 }

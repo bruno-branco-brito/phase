@@ -1890,6 +1890,31 @@ fn extract_unless_pay_modifier(
         }
     }
 
+    // CR 115.1 + CR 118.12a: "target opponent/target player pays {cost}" — the
+    // trigger's declared player target (chosen at stack placement, CR 603.3d)
+    // restated as the unless-payer. Represented as a declared-target `Typed`
+    // payer (resolved from ability.targets), distinct from the anaphoric "that
+    // opponent" (-> TriggeringPlayer) handled above. The verb+cost remainder is
+    // parsed by the shared `parse_unless_they_branch_by_verb` authority so the
+    // full cost taxonomy (pays N life, sacrifices, discards) is covered.
+    let declared_target_payer: Result<(&str, TargetFilter), _> = alt((
+        value(
+            TargetFilter::Typed(TypedFilter::default().controller(ControllerRef::Opponent)),
+            tag::<_, _, OracleError<'_>>("target opponent "),
+        ),
+        value(
+            TargetFilter::Typed(TypedFilter::default()),
+            tag("target player "),
+        ),
+    ))
+    .parse(after_unless);
+    if let Ok((after_payer, payer)) = declared_target_payer {
+        if let Some((cost, _)) = parse_unless_they_branch_by_verb(after_payer) {
+            let cleaned = text[..unless_pos].trim().to_string();
+            return (cleaned, Some(UnlessPayModifier { cost, payer }));
+        }
+    }
+
     // CR 118.12 + CR 608.2c + CR 119.4: Non-mana alternative costs ("you discard
     // a card", "you sacrifice a [filter]", "you pay N life") map to existing
     // `UnlessCost` variants — the runtime resolver in `engine_payment_choices.rs`
@@ -19291,6 +19316,111 @@ mod tests {
             matches!(unless.cost, AbilityCost::PayEnergy { .. }),
             "delayed unless-cost must be AbilityCost::PayEnergy, got {:?}",
             unless.cost
+        );
+    }
+
+    /// CR 115.1 + CR 118.12a + CR 603.3d: Athreos, God of Passage — "Whenever
+    /// another creature you control dies, return it to its owner's hand unless
+    /// target opponent pays 3 life." The unless-payer is DECLARED as a target
+    /// inside the unless clause, distinct from the anaphoric "they"/"that
+    /// opponent" forms. The payer must be a declared-target `Typed` (opponent
+    /// controller, no type/property filters), the cost `PayLife { 3 }`, and the
+    /// body effect must be the return-to-hand (not `Effect::Unimplemented`).
+    #[test]
+    fn athreos_god_of_passage_targeted_opponent_unless_pay() {
+        use crate::types::ability::{AbilityCost, Effect, QuantityExpr};
+
+        let def = parse_trigger_line(
+            "Whenever another creature you control dies, return it to its owner's hand \
+             unless target opponent pays 3 life.",
+            "Athreos, God of Passage",
+        );
+
+        let unless = def
+            .unless_pay
+            .as_ref()
+            .expect("Athreos trigger must carry the unless-pay modifier");
+        assert_eq!(
+            unless.payer,
+            TargetFilter::Typed(TypedFilter::default().controller(ControllerRef::Opponent)),
+            "payer must be a declared-target opponent Typed, not the anaphoric forms"
+        );
+        assert_eq!(
+            unless.cost,
+            AbilityCost::PayLife {
+                amount: QuantityExpr::Fixed { value: 3 }
+            },
+            "cost must be PayLife 3, got {:?}",
+            unless.cost
+        );
+
+        // The body effect must be the return-to-hand, NOT an Unimplemented gap.
+        // Accept either lowering of "return it to its owner's hand"
+        // (`ChangeZone { destination: Hand }` or `Bounce`).
+        let exec = def.execute.as_deref().expect("Athreos execute body");
+        assert!(
+            !matches!(&*exec.effect, Effect::Unimplemented { .. }),
+            "body effect must be the parsed return-to-hand, got {:?}",
+            exec.effect
+        );
+        assert!(
+            matches!(
+                &*exec.effect,
+                Effect::ChangeZone {
+                    destination: Zone::Hand,
+                    ..
+                } | Effect::Bounce {
+                    destination: Some(Zone::Hand) | None,
+                    ..
+                }
+            ),
+            "body effect must return the creature to its owner's hand, got {:?}",
+            exec.effect
+        );
+    }
+
+    /// Sibling guard for the declared-target arm: the anaphoric pronoun forms
+    /// must NOT collapse to the declared-target `Typed` payer. "...unless they
+    /// pay 3 life" stays `Player`; "...unless that opponent pays 3 life" stays
+    /// `TriggeringPlayer` (CR 118.12a anaphoric resolution).
+    #[test]
+    fn unless_pay_anaphoric_payers_distinct_from_declared_target() {
+        use crate::types::ability::AbilityCost;
+
+        // "they pay" — anaphoric to the effect's targeted player → Player.
+        let they = parse_trigger_line(
+            "Whenever you attack, target opponent loses 3 life unless they pay 3 life.",
+            "They Pay Test",
+        );
+        let they_unless = they
+            .unless_pay
+            .as_ref()
+            .expect("\"they pay\" must yield an unless-pay modifier");
+        assert_eq!(
+            they_unless.payer,
+            TargetFilter::Player,
+            "\"they pay\" stays anaphoric Player, not the declared-target Typed"
+        );
+
+        // "that opponent pays" — anaphoric to the triggering player.
+        let that = parse_trigger_line(
+            "Whenever a player casts a spell, that player draws a card \
+             unless that opponent pays 3 life.",
+            "That Opponent Pay Test",
+        );
+        let that_unless = that
+            .unless_pay
+            .as_ref()
+            .expect("\"that opponent pays\" must yield an unless-pay modifier");
+        assert_eq!(
+            that_unless.payer,
+            TargetFilter::TriggeringPlayer,
+            "\"that opponent pays\" stays anaphoric TriggeringPlayer"
+        );
+        assert!(
+            matches!(that_unless.cost, AbilityCost::PayLife { .. }),
+            "cost must be PayLife, got {:?}",
+            that_unless.cost
         );
     }
 
