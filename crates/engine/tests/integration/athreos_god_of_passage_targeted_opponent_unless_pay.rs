@@ -113,10 +113,7 @@ fn select_trigger_target(runner: &mut engine::game::scenario::GameRunner, chosen
 
 /// Advance to the `UnlessPayment` prompt (resolving the trigger off the stack),
 /// asserting the payer is `expected`. Returns once the prompt is reached.
-fn advance_to_unless_payment(
-    runner: &mut engine::game::scenario::GameRunner,
-    expected: PlayerId,
-) {
+fn advance_to_unless_payment(runner: &mut engine::game::scenario::GameRunner, expected: PlayerId) {
     for _ in 0..64 {
         match runner.state().waiting_for.clone() {
             WaitingFor::UnlessPayment { player, .. } => {

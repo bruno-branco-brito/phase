@@ -61067,10 +61067,8 @@ mod tests {
             "\"any player pays\" must stay AllPlayers"
         );
 
-        let (_, you) = extract_resolution_unless_pay_modifier(
-            "Draw a card unless you pay 2 life.",
-            None,
-        );
+        let (_, you) =
+            extract_resolution_unless_pay_modifier("Draw a card unless you pay 2 life.", None);
         assert_eq!(
             you.expect("you-pay unless-pay").payer,
             TargetFilter::Controller,
