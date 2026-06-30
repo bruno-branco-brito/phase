@@ -1083,11 +1083,7 @@ pub fn resolve_effect_player_ref(
         // identically to the anaphoric `Player` arm above. Gated on the
         // declared-target shape (empty type filters/properties, None/Opponent
         // controller) so it never collides with the `ChosenPlayer` arm.
-        TargetFilter::Typed(tf)
-            if tf.type_filters.is_empty()
-                && tf.properties.is_empty()
-                && matches!(tf.controller, None | Some(ControllerRef::Opponent)) =>
-        {
+        filter if crate::game::ability_utils::payer_is_declared_target(filter) => {
             ability.targets.iter().find_map(|target| match target {
                 TargetRef::Player(player) => Some(*player),
                 _ => None,
@@ -4452,6 +4448,7 @@ mod tests {
         let event = crate::types::events::GameEvent::AbilityActivated {
             player_id: PlayerId(1),
             source_id: ObjectId(99),
+            kind: crate::types::events::ActivatedAbilityKind::Normal,
         };
         assert_eq!(extract_player_from_event(&event, &state), Some(PlayerId(1)));
     }

@@ -1532,6 +1532,27 @@ pub fn validate_targets_in_chain(state: &GameState, ability: &ResolvedAbility) -
                     .cloned()
                     .collect()
             }
+            Some(filter) if ability_needs_companion_target_player_slot(&validated) => {
+                let mut kept = Vec::new();
+                let primary_targets = match validated.targets.split_first() {
+                    Some((companion, rest))
+                        if companion_target_player_legal_targets(state, &validated)
+                            .contains(companion) =>
+                    {
+                        kept.push(companion.clone());
+                        rest
+                    }
+                    Some((_, rest)) => rest,
+                    None => &[],
+                };
+                kept.extend(targeting::validate_targets_for_ability(
+                    state,
+                    primary_targets,
+                    filter,
+                    &validated,
+                ));
+                kept
+            }
             Some(filter) => targeting::validate_targets_for_ability(
                 state,
                 &validated.targets,
@@ -2648,7 +2669,7 @@ pub(crate) fn filter_references_target_player(filter: &TargetFilter) -> bool {
 /// `TriggeringPlayer`). The declared-target forms are the only player-typed `Typed`
 /// payers with empty type filters/properties and a None/Opponent controller; no
 /// anaphoric path emits that shape, so the match is unambiguous.
-fn payer_is_declared_target(payer: &TargetFilter) -> bool {
+pub(crate) fn payer_is_declared_target(payer: &TargetFilter) -> bool {
     matches!(
         payer,
         TargetFilter::Typed(tf)

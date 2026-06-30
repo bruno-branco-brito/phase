@@ -22,9 +22,11 @@ use engine::game::scenario::{GameScenario, P0, P1};
 use engine::game::triggers::process_triggers;
 use engine::types::ability::{ContinuousModification, Duration, TargetFilter, TargetRef};
 use engine::types::actions::GameAction;
-use engine::types::game_state::WaitingFor;
+use engine::types::game_state::{CastPaymentMode, WaitingFor};
 use engine::types::identifiers::ObjectId;
 use engine::types::keywords::{Keyword, ProtectionTarget};
+use engine::types::mana::{ManaCost, ManaCostShard, ManaType, ManaUnit};
+use engine::types::phase::Phase;
 use engine::types::player::PlayerId;
 use engine::types::zones::Zone;
 
@@ -32,6 +34,22 @@ const P2: PlayerId = PlayerId(2);
 
 const ATHREOS_TRIGGER: &str = "Whenever another creature you control dies, \
      return it to its owner's hand unless target opponent pays 3 life.";
+
+const DECLARED_PAYER_DESTROY: &str = "Destroy target creature unless target opponent pays 3 life.";
+
+fn add_mana(runner: &mut engine::game::scenario::GameRunner, mana: &[ManaType]) {
+    let dummy = ObjectId(0);
+    let pool = &mut runner
+        .state_mut()
+        .players
+        .iter_mut()
+        .find(|p| p.id == P0)
+        .unwrap()
+        .mana_pool;
+    for m in mana {
+        pool.add(ManaUnit::new(*m, dummy, false, vec![]));
+    }
+}
 
 /// True when `player`'s `zone` holds an object named `name`. Name-based (not
 /// ObjectId-based) so it survives the CR 400.7 new-object-per-zone-change churn
@@ -137,13 +155,91 @@ fn advance_to_unless_payment(runner: &mut engine::game::scenario::GameRunner, ex
 /// controls. Returns `(runner, victim_id)`.
 fn setup_three_player() -> (engine::game::scenario::GameRunner, ObjectId) {
     let mut scenario = GameScenario::new_n_player(3, 42);
-    scenario.at_phase(engine::types::phase::Phase::PreCombatMain);
+    scenario.at_phase(Phase::PreCombatMain);
 
     scenario.add_creature_from_oracle(P0, "Athreos, God of Passage", 0, 0, ATHREOS_TRIGGER);
     let victim = scenario.add_creature(P0, "Grizzly Bears", 2, 2).id();
 
     let runner = scenario.build();
     (runner, victim)
+}
+
+fn setup_destroy_spell_at_unless_prompt() -> (engine::game::scenario::GameRunner, ObjectId) {
+    let mut scenario = GameScenario::new_n_player(3, 43);
+    scenario.at_phase(Phase::PreCombatMain);
+
+    let spell = scenario
+        .add_spell_to_hand_from_oracle(P0, "Declared Payer Destroy", true, DECLARED_PAYER_DESTROY)
+        .with_mana_cost(ManaCost::Cost {
+            shards: vec![ManaCostShard::Black],
+            generic: 1,
+        })
+        .id();
+    let creature = scenario.add_creature(P1, "P1 Bear", 2, 2).id();
+
+    let mut runner = scenario.build();
+    add_mana(&mut runner, &[ManaType::Colorless, ManaType::Black]);
+
+    runner
+        .act(GameAction::CastSpell {
+            object_id: spell,
+            card_id: runner.state().objects[&spell].card_id,
+            targets: vec![],
+            payment_mode: CastPaymentMode::Auto,
+        })
+        .expect("cast declared-payer destroy spell");
+
+    for _ in 0..24 {
+        match runner.state().waiting_for.clone() {
+            WaitingFor::TargetSelection { target_slots, .. } => {
+                assert_eq!(
+                    target_slots.len(),
+                    2,
+                    "spell must surface the creature target and declared payer target"
+                );
+                assert!(
+                    target_slots[0]
+                        .legal_targets
+                        .contains(&TargetRef::Player(P2)),
+                    "first target slot must accept the chosen opponent payer, slots = {target_slots:?}"
+                );
+                assert!(
+                    !target_slots[0]
+                        .legal_targets
+                        .contains(&TargetRef::Player(P0)),
+                    "the caster must not be legal for a target-opponent payer"
+                );
+                assert!(
+                    target_slots[1]
+                        .legal_targets
+                        .contains(&TargetRef::Object(creature)),
+                    "second target slot must accept the target creature, slots = {target_slots:?}"
+                );
+                runner
+                    .act(GameAction::SelectTargets {
+                        targets: vec![TargetRef::Player(P2), TargetRef::Object(creature)],
+                    })
+                    .expect("select creature target and opponent payer");
+            }
+            WaitingFor::ManaPayment { .. } => {
+                runner.act(GameAction::PassPriority).expect("pay mana");
+            }
+            WaitingFor::Priority { .. } => break,
+            other => panic!("unexpected pre-resolution prompt: {other:?}"),
+        }
+    }
+
+    runner.advance_until_stack_empty();
+    assert!(
+        matches!(
+            runner.state().waiting_for,
+            WaitingFor::UnlessPayment { player: P2, .. }
+        ),
+        "declared payer target must resolve to the chosen opponent, got {:?}",
+        runner.state().waiting_for
+    );
+
+    (runner, creature)
 }
 
 /// CR 115.1 + CR 118.12a + CR 119.4 (V6 decline): the chosen opponent (P2)
@@ -212,6 +308,60 @@ fn athreos_chosen_opponent_pays_keeps_creature_in_graveyard() {
         runner.life(P2),
         p2_life_before - 3,
         "paying the unless-cost must deduct exactly 3 life from the chosen opponent"
+    );
+}
+
+/// CR 115.1 + CR 118.12a: resolution-side declared-target payers compose with
+/// the primary effect's ordinary target slot. Declining the chosen opponent
+/// payer's cost lets the destroy effect happen.
+#[test]
+fn resolution_declared_payer_decline_destroys_target_creature() {
+    let (mut runner, creature) = setup_destroy_spell_at_unless_prompt();
+    let p2_life_before = runner.life(P2);
+
+    runner
+        .act(GameAction::PayUnlessCost { pay: false })
+        .expect("decline declared payer cost");
+    runner.advance_until_stack_empty();
+
+    assert!(
+        name_in_zone(&runner, P1, Zone::Graveyard, "P1 Bear"),
+        "declining the declared payer cost must destroy the target creature"
+    );
+    assert_eq!(
+        runner.life(P2),
+        p2_life_before,
+        "declining must not charge the chosen payer"
+    );
+    assert_ne!(
+        runner.state().objects[&creature].zone,
+        Zone::Battlefield,
+        "the original target object must leave the battlefield"
+    );
+}
+
+/// CR 118.12a + CR 119.4: when the chosen opponent pays the declared-target
+/// unless cost, the primary resolution-side effect is suppressed and that
+/// opponent loses exactly 3 life.
+#[test]
+fn resolution_declared_payer_pay_prevents_destroy() {
+    let (mut runner, creature) = setup_destroy_spell_at_unless_prompt();
+    let p2_life_before = runner.life(P2);
+
+    runner
+        .act(GameAction::PayUnlessCost { pay: true })
+        .expect("pay declared payer cost");
+    runner.advance_until_stack_empty();
+
+    assert_eq!(
+        runner.state().objects[&creature].zone,
+        Zone::Battlefield,
+        "paying the declared payer cost must prevent the destroy effect"
+    );
+    assert_eq!(
+        runner.life(P2),
+        p2_life_before - 3,
+        "paying the declared payer cost must charge the chosen opponent"
     );
 }
 
