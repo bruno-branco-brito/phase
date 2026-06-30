@@ -2429,9 +2429,7 @@ mod tests {
         base_id: u64,
     ) -> Vec<ObjectId> {
         (0..count)
-            .map(|i| {
-                add_library_creature(state, base_id + i, owner, &format!("Stacked {i}"))
-            })
+            .map(|i| add_library_creature(state, base_id + i, owner, &format!("Stacked {i}")))
             .collect()
     }
 
@@ -2557,8 +2555,7 @@ mod tests {
         // CR 701.23f: P0 controls Aven. P1 (opponent of P0) searches P2's library
         // (searcher ≠ owner). The cap keys off the SEARCHER (P1, an opponent of
         // Aven's controller), so the top-4 limit still applies to P2's library.
-        let mut state =
-            GameState::new(crate::types::game_state::FormatConfig::standard(), 3, 42);
+        let mut state = GameState::new(crate::types::format::FormatConfig::standard(), 3, 42);
         add_restrict_search_to_top_permanent(
             &mut state,
             PlayerId(0),
@@ -2591,8 +2588,16 @@ mod tests {
 
         match &state.waiting_for {
             WaitingFor::SearchChoice { player, cards, .. } => {
-                assert_eq!(*player, PlayerId(1), "searcher (caster P1) browses P2's library");
-                assert_eq!(cards.len(), 4, "cap keyed by searcher applies to P2's library");
+                assert_eq!(
+                    *player,
+                    PlayerId(1),
+                    "searcher (caster P1) browses P2's library"
+                );
+                assert_eq!(
+                    cards.len(),
+                    4,
+                    "cap keyed by searcher applies to P2's library"
+                );
                 for bottom in &lib[4..6] {
                     assert!(!cards.contains(bottom));
                 }
@@ -2616,7 +2621,13 @@ mod tests {
         // P1 library: 6 "Target" creatures; only the top 4 should be offered.
         let lib: Vec<ObjectId> = (0..6)
             .map(|i| {
-                create_object(&mut state, CardId(1 + i), PlayerId(1), "Target".to_string(), Zone::Library)
+                create_object(
+                    &mut state,
+                    CardId(1 + i),
+                    PlayerId(1),
+                    "Target".to_string(),
+                    Zone::Library,
+                )
             })
             .collect();
         // P1 graveyard: 3 "Target" cards; all should be offered (uncapped).
@@ -2657,7 +2668,11 @@ mod tests {
         match &state.waiting_for {
             WaitingFor::SearchChoice { cards, .. } => {
                 // 4 (top of library) + 3 (whole graveyard) = 7.
-                assert_eq!(cards.len(), 7, "library capped to top 4; graveyard uncapped");
+                assert_eq!(
+                    cards.len(),
+                    7,
+                    "library capped to top 4; graveyard uncapped"
+                );
                 for top in &lib[0..4] {
                     assert!(cards.contains(top));
                 }

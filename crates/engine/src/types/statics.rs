@@ -2954,9 +2954,10 @@ impl FromStr for StaticMode {
                 {
                     // CR 701.23f + CR 614.1a: Round-trip of scope + count.
                     if let Some((who_str, count_str)) = inner.split_once(',') {
-                        if let (Ok(who), Ok(count)) =
-                            (ProhibitionScope::from_str(who_str), count_str.parse::<u32>())
-                        {
+                        if let (Ok(who), Ok(count)) = (
+                            ProhibitionScope::from_str(who_str),
+                            count_str.parse::<u32>(),
+                        ) {
                             return Ok(StaticMode::RestrictLibrarySearchToTop { who, count });
                         }
                     }
